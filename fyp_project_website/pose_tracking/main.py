@@ -1,69 +1,77 @@
-import os
+import cv2 as cv
+import numpy as np
+import argparse
 
-import cvzone
-import cv2
-from cvzone.PoseModule import PoseDetector
+parser = argparse.ArgumentParser()
+parser.add_argument('--input', help='Path to image or video. Skip to capture frames from camera')
+parser.add_argument('--thr', default=0.2, type=float, help='Threshold value for pose parts heat map')
+parser.add_argument('--width', default=368, type=int, help='Resize input to specific width.')
+parser.add_argument('--height', default=368, type=int, help='Resize input to specific height.')
 
-cap = cv2.VideoCapture("Resources/Videos/1.mp4")
-detector = PoseDetector()
+args = parser.parse_args()
 
-shirtFolderPath = "Resources/Shirts"
-listShirts = os.listdir(shirtFolderPath)
-# print(listShirts)
-fixedRatio = 262 / 190  # widthOfShirt/widthOfPoint11to12
-shirtRatioHeightWidth = 581 / 440
-imageNumber = 0
-imgButtonRight = cv2.imread("Resources/button.png", cv2.IMREAD_UNCHANGED)
-imgButtonLeft = cv2.flip(imgButtonRight, 1)
-counterRight = 0
-counterLeft = 0
-selectionSpeed = 10
+BODY_PARTS = { "Nose": 0, "Neck": 1, "RShoulder": 2, "RElbow": 3, "RWrist": 4,
+               "LShoulder": 5, "LElbow": 6, "LWrist": 7, "RHip": 8, "RKnee": 9,
+               "RAnkle": 10, "LHip": 11, "LKnee": 12, "LAnkle": 13, "REye": 14,
+               "LEye": 15, "REar": 16, "LEar": 17, "Background": 18 }
 
-while True:
-    success, img = cap.read()
-    img = detector.findPose(img)
-    # img = cv2.flip(img,1)
-    lmList, bboxInfo = detector.findPosition(img, bboxWithHands=False, draw=False)
-    if lmList:
-        # center = bboxInfo["center"]
-        lm11 = lmList[11][1:3]
-        lm12 = lmList[12][1:3]
-        imgShirt = cv2.imread(os.path.join(shirtFolderPath, listShirts[imageNumber]), cv2.IMREAD_UNCHANGED)
+POSE_PAIRS = [ ["Neck", "RShoulder"], ["Neck", "LShoulder"], ["RShoulder", "RElbow"],
+               ["RElbow", "RWrist"], ["LShoulder", "LElbow"], ["LElbow", "LWrist"],
+               ["Neck", "RHip"], ["RHip", "RKnee"], ["RKnee", "RAnkle"], ["Neck", "LHip"],
+               ["LHip", "LKnee"], ["LKnee", "LAnkle"], ["Neck", "Nose"], ["Nose", "REye"],
+               ["REye", "REar"], ["Nose", "LEye"], ["LEye", "LEar"] ]
 
-        widthOfShirt = int((lm11[0] - lm12[0]) * fixedRatio)
-        print(widthOfShirt)
-        imgShirt = cv2.resize(imgShirt, (widthOfShirt, int(widthOfShirt * shirtRatioHeightWidth)))
-        currentScale = (lm11[0] - lm12[0]) / 190
-        offset = int(44 * currentScale), int(48 * currentScale)
+inWidth = args.width
+inHeight = args.height
 
-        try:
-            img = cvzone.overlayPNG(img, imgShirt, (lm12[0] - offset[0], lm12[1] - offset[1]))
-        except:
-            pass
+net = cv.dnn.readNetFromTensorflow("pose_tracking/pose.pb")
 
-        img = cvzone.overlayPNG(img, imgButtonRight, (1074, 293))
-        img = cvzone.overlayPNG(img, imgButtonLeft, (72, 293))
+cap = cv.VideoCapture(args.input if args.input else 0)
 
-        if lmList[16][1] < 300:
-            counterRight += 1
-            cv2.ellipse(img, (139, 360), (66, 66), 0, 0,
-                        counterRight * selectionSpeed, (0, 255, 0), 20)
-            if counterRight * selectionSpeed > 360:
-                counterRight = 0
-                if imageNumber < len(listShirts) - 1:
-                    imageNumber += 1
-        elif lmList[15][1] > 900:
-            counterLeft += 1
-            cv2.ellipse(img, (1138, 360), (66, 66), 0, 0,
-                        counterLeft * selectionSpeed, (0, 255, 0), 20)
-            if counterLeft * selectionSpeed > 360:
-                counterLeft = 0
-                if imageNumber > 0:
-                    imageNumber -= 1
+while cv.waitKey(1) < 0:
+    hasFrame, frame = cap.read()
+    if not hasFrame:
+        cv.waitKey()
+        break
 
-        else:
-            counterRight = 0
-            counterLeft = 0
+    frameWidth = frame.shape[1]
+    frameHeight = frame.shape[0]
 
-    cv2.imshow("Image", img)
-    cv2.waitKey(1)
+    net.setInput(cv.dnn.blobFromImage(frame, 1.0, (inWidth, inHeight), (127.5, 127.5, 127.5), swapRB=True, crop=False))
+    out = net.forward()
+    out = out[:, :19, :, :]  # MobileNet output [1, 57, -1, -1], we only need the first 19 elements
+
+    assert(len(BODY_PARTS) == out.shape[1])
+
+    points = []
+    for i in range(len(BODY_PARTS)):
+        # Slice heatmap of corresponding body part.
+        heatMap = out[0, i, :, :]
+
+        # Find the location of the maximum value (peak) in the heatmap
+        _, conf, _, point = cv.minMaxLoc(heatMap)
+        x = (frameWidth * point[0]) / out.shape[3]
+        y = (frameHeight * point[1]) / out.shape[2]
+
+        # Add a point if its confidence is higher than the threshold
+        points.append((int(x), int(y)) if conf > args.thr else None)
+
+    for pair in POSE_PAIRS:
+        partFrom = pair[0]
+        partTo = pair[1]
+        assert(partFrom in BODY_PARTS)
+        assert(partTo in BODY_PARTS)
+
+        idFrom = BODY_PARTS[partFrom]
+        idTo = BODY_PARTS[partTo]
+
+        if points[idFrom] and points[idTo]:
+            cv.line(frame, points[idFrom], points[idTo], (0, 255, 0), 3)
+            cv.ellipse(frame, points[idFrom], (3, 3), 0, 0, 360, (0, 0, 255), cv.FILLED)
+            cv.ellipse(frame, points[idTo], (3, 3), 0, 0, 360, (0, 0, 255), cv.FILLED)
+
+    t, _ = net.getPerfProfile()
+    freq = cv.getTickFrequency() / 1000
+    cv.putText(frame, '%.2fms' % (t / freq), (10, 20), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0))
+
+    cv.imshow('OpenPose using OpenCV', frame)
