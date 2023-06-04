@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Real-time Camera Example</title>
+</head>
+<body>
+  <button id="tryNowButton">Try Now</button>
+  <video id="videoElement" width="640" height="480" autoplay></video>
+
+  <script>
+    // Get the button and video elements
+    const button = document.getElementById('tryNowButton');
+    const video = document.getElementById('videoElement');
+
+    // Function to handle button click
+    function openCamera() {
+      // Request access to the user's camera
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          // Set the video element's source to the camera stream
+          video.srcObject = stream;
+        })
+        .catch(error => {
+          console.log('Error accessing camera:', error);
+        });
+    }
+
+    // Add click event listener to the button
+    button.addEventListener('click', openCamera);
+  </script>
+</body>
+</html>
