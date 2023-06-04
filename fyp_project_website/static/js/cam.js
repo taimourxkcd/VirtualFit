@@ -1,5 +1,5 @@
 $(document).ready(function () {
-  $("#openWebcamButton").click(function () {
+  $(".openWebcamButton").click(function () {
     $.ajax({
       url: "/run-main",
       type: "GET",
