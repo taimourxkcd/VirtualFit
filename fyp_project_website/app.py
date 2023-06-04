@@ -1,5 +1,9 @@
 from flask import Flask, render_template
 import subprocess
+import os
+
+app_root = os.path.dirname(os.path.abspath(__file__))
+main_script_path = os.path.join(app_root, 'pose_tracking', 'main.py')
 
 app = Flask(__name__)
 
@@ -9,7 +13,7 @@ def home():
 
 @app.route('/run-main')
 def run_main():
-    subprocess.Popen(['python', 'pose_tracking/main.py'])
+    subprocess.Popen(['python', main_script_path])
     return 'Running main.py'
 
 if __name__ == '__main__':
